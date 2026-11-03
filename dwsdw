@@ -28,9 +28,9 @@ local function get_nocollision()
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 02] OBSIDIAN UI INIT
+-- [BLOCK 02] UI LIBRARY INIT
 -- ═══════════════════════════════════════════════════════════════════════════
-local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/" -- UI library (publicly available)
 local Library      = loadstring(game:HttpGet(repo .. "Library.lua"))()
 local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
 local SaveManager  = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
@@ -134,7 +134,7 @@ end
 
 local Window = Library:CreateWindow({
     Title = "Zalupa.HooK",
-    Footer = "Tomboy Combat + pin.reta merge",
+    Footer = "v1.0 Beta",
     Icon = 95816097006870,
     NotifySide = "Right",
     ShowCustomCursor = true,
@@ -402,7 +402,7 @@ cheat.utility.new_heartbeat(function()
     local folder = ReplicatedStorage:FindFirstChild("Players")
     local data = folder and folder:FindFirstChild(LocalPlayer.Name)
     if not data then return end
-    -- EXACT paths from swim.lua:
+    -- ReplicatedStorage paths used by the game:
     local status = data:FindFirstChild("Status")
     local journey = status and status:FindFirstChild("Journey")
     local stats = journey and journey:FindFirstChild("Statistics")
@@ -440,7 +440,7 @@ cheat.utility.new_heartbeat(function()
         if n and (not top_name or v > (_lpi_item_price(top_name) or 0)) then top_name = n end
     end
     local player_count = #Players:GetPlayers()
-    -- FIX #1: Obsidian Label требует :SetText() — прямой .Text= не обновляет UI
+    -- FIX #1: Label requires :SetText() — direct .Text= does not update UI
     pcall(function() if _lpi_labels.reports   then _lpi_labels.reports:SetText("Reports: " .. tostring(total_reps)) end end)
     pcall(function() if _lpi_labels.kd         then _lpi_labels.kd:SetText("K/D: " .. tostring(kills) .. "/" .. tostring(deaths)) end end)
     pcall(function() if _lpi_labels.loot       then _lpi_labels.loot:SetText("Loot value: $" .. tostring(loot_val)) end end)
@@ -668,7 +668,7 @@ WeaponGroup:AddToggle("MeleeReach", { Text = "Melee Reach", Default = false, Cal
 WeaponGroup:AddSlider("MeleeReachDist", { Text = "Melee Extra Studs", Min = 1, Max = 15, Rounding = 1, Default = 5, Callback = function(v) melee_reach_dist = v end })
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 05b] UNLOCK FIREMODES + CHARGE SHOT (интеграция из pin.reta)
+-- [BLOCK 05b] UNLOCK FIREMODES + CHARGE SHOT
 -- ═══════════════════════════════════════════════════════════════════════════
 WeaponGroup:AddToggle("UnlockFiremodes", {
     Text = "Unlock Firemodes (Auto on all guns)",
@@ -879,7 +879,7 @@ task.spawn(function()
         return chosen_ammo, needed_ammo > ammo_amount and ammo_amount or needed_ammo
     end
 
-    -- Auto refill (из pin.reta с explicit caliber map — надёжнее, чем CompatibleAmmo alone)
+    -- Auto refill with explicit caliber map (more reliable than CompatibleAmmo alone)
     local itemsList = ReplicatedStorage:FindFirstChild("ItemsList")
     local function getItemTemplate(itemName)
         if itemsList and itemsList:FindFirstChild(itemName) then
@@ -892,7 +892,7 @@ task.spawn(function()
         return nil
     end
 
-    -- explicit caliber map (из pin.reta): MagName → set of compatible ammo names
+    -- explicit caliber map: MagName → set of compatible ammo names
     local explicit_mag_ammo_map = {
         Mag556 = {["556x45AP"]=true, ["556x45Tracer"]=true},
         ["20Rnd556"] = {["556x45AP"]=true, ["556x45Tracer"]=true},
@@ -1001,7 +1001,7 @@ task.spawn(function()
         end
     end)
 
-    -- Auto reload (из pin.reta — упрощённый, без useDebounce проверки которая блокировала)
+    -- Auto reload (simplified — no useDebounce check that was blocking)
     if fps_usetypes then
         local remove_bullet
         pcall(function() remove_bullet = getupvalue(fps_usetypes.RangedWeaponDefault, 4) end)
@@ -1060,9 +1060,9 @@ ExtraGroup:AddSlider("TracerLife", { Text = "Tracer Lifetime", Min = 1, Max = 50
 ExtraGroup:AddSlider("ShootSpeed", { Text = "Shoot Speed Mult", Min = 1, Max = 30, Rounding = 1, Default = 10, Callback = function(v) shootspeed = v / 10 end })
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 06] INVENTORY CHECKER (v8 port — draggable frames, right-center main / left backpack)
--- Layout: weapons+clothing+armor+helmet on the RIGHT side of viewport center,
---         backpack (full inv grid) on the LEFT side. Both vertically centered.
+-- [BLOCK 06] INVENTORY CHECKER (draggable frames, right-side main / top backpack)
+-- Layout: weapons+clothing+armor+helmet on the RIGHT side of viewport,
+--         backpack (full inv grid) on the TOP of viewport. Both draggable.
 -- ═══════════════════════════════════════════════════════════════════════════
 local InvGroup = Tabs.Combat:AddLeftGroupbox(L("grp_inventory"))
 local InvToggle = InvGroup:AddToggle("InvChecker", {
@@ -1605,7 +1605,7 @@ cheat.EspLibrary = {} do
                 chams_intensity = 0.5, chams_saturation = 1.0,
                 high_kd_marker = false,
                 high_kd_outline_color = Color3.fromRGB(255, 0, 0),
-                -- Skeleton ESP (ported from pin.reta)
+                -- Skeleton ESP
                 skeleton = false,
                 skeleton_color = { Color3.new(1,1,1), 0 },
             },
@@ -1771,7 +1771,7 @@ cheat.EspLibrary = {} do
         end
     end)
 
-    -- Skeleton bone order (ported from pin.reta)
+    -- Skeleton bone order
     -- Maps each bone name -> its parent bone name. Drives Line drawing per-bone.
     local skeleton_order = {
         ["LeftFoot"] = "LeftLowerLeg",
@@ -1821,7 +1821,7 @@ cheat.EspLibrary = {} do
             loaded_plrs[player].obj["health_bar_glow_cap_bottom_"..i]= create_obj("Circle", { Visible=false, Filled=true, ZIndex=1 })
         end
 
-        -- Skeleton bone Line drawings (ported from pin.reta)
+        -- Skeleton bone Line drawings
         for bone_name, _ in pairs(skeleton_order) do
             loaded_plrs[player].obj["skeleton_"..bone_name] = create_obj("Line", { Visible=false, Thickness=1, ZIndex=2 })
         end
@@ -2151,7 +2151,7 @@ cheat.EspLibrary = {} do
                 cham.OutlineTransparency = settings.chams_outline and math.clamp(settings.chamsoutline_color[2]+int_off, 0, 0.99) or 1
             end
 
-            -- SKELETON ESP render (ported from pin.reta)
+            -- SKELETON ESP render
             if settings.skeleton then
                 -- Cache bone→parent→Line mapping on character change.
                 -- FIX: plr.last_character may be nil and _skel_char_cached_for may be nil,
@@ -2341,7 +2341,7 @@ cheat.EspLibrary = {} do
         end
 
         if item_finder_esp_enabled then
-            -- FIX #4: selected_finder_items — это dict из Obsidian dropdown.
+            -- FIX #4: selected_finder_items is a dict from the multi-select dropdown.
             -- Было `#selected_finder_items > 0` → всегда 0 для dict.
             -- Стало `next(...) ~= nil` — универсальная проверка.
             if selected_finder_items and next(selected_finder_items) ~= nil then
@@ -2453,7 +2453,7 @@ local function colorCb(setter)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 09a] HIT EFFECTS HELPERS (из pin.reta)
+-- [BLOCK 09a] HIT EFFECTS HELPERS
 -- ═══════════════════════════════════════════════════════════════════════════
 local function spawn_damage_number(pos, damage)
     if not pos or not damage then return end
@@ -2897,7 +2897,7 @@ ESPL:AddToggle("esp_weapon", { Text = "Weapon ESP", Default = false, Callback = 
 ESPL:AddToggle("esp_outline", { Text = "Text Outline", Default = false, Callback = function(v) es.dist_outline = v; cheat.EspLibrary.icaca() end })
     :AddColorPicker("esp_outlinecol", { Title = "Outline Color", Default = Color3.new(0,0,0), Callback = function(v) es.dist_outline_color = v; cheat.EspLibrary.icaca() end })
 
--- Skeleton ESP (ported from pin.reta)
+-- Skeleton ESP
 ESPL:AddToggle("esp_skeleton", { Text = "Skeleton ESP", Default = false, Callback = function(v) es.skeleton = v; cheat.EspLibrary.icaca() end })
     :AddColorPicker("esp_skelcol", { Title = "Skeleton Color", Default = Color3.new(1,1,1), Callback = colorCb(es.skeleton_color) })
 ESPL:AddSlider("esp_skeltrans", { Text = "Skeleton Transparency", Default = 0, Min = 0, Max = 1, Rounding = 1, Callback = function(v) es.skeleton_color[2] = v; cheat.EspLibrary.icaca() end })
@@ -3126,7 +3126,7 @@ function cheat.fire_hit_effects(target_part)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 11] ITEM FINDER (из pin.reta — обновлённый, dict lookup)
+-- [BLOCK 11] ITEM FINDER (updated, dict lookup)
 -- ═══════════════════════════════════════════════════════════════════════════
 local item_list = {}
 pcall(function()
@@ -3197,7 +3197,7 @@ cheat.utility.new_heartbeat(function()
         found_players = finder_cache
     else
         last_finder_scan = now3
-        -- FIX: selected_finder_items — dict из Obsidian, используем прямой lookup
+        -- FIX: selected_finder_items is a dict, use direct lookup
         found_players = {}
         if selected_finder_items and next(selected_finder_items) ~= nil then
             for _,player in ipairs(Players:GetPlayers()) do
@@ -3279,7 +3279,7 @@ PlayerGroup:AddToggle("speedhack", {Text = "Speedhack", Default = false, Callbac
     end
 end})
 PlayerGroup:AddToggle("speedhack_auto", {Text = "Auto Speed", Default = false, Callback = function(v) speedhack_autospeed = v end})
-PlayerGroup:AddSlider("speedhack_speed", {Text = "Speedhack Speed", Min = 1, Max = 24, Rounding = 1, Default = 18, Callback = function(v) speedhack_speed = v end})
+PlayerGroup:AddSlider("speedhack_speed", {Text = "Speedhack Speed", Min = 1, Max = 22, Rounding = 1, Default = 18, Callback = function(v) speedhack_speed = v end})
 PlayerGroup:AddSlider("speedhack_offset", {Text = "Auto Speed Offset", Min = -5, Max = 5, Rounding = 1, Default = 3, Callback = function(v) speedhack_autospeed_offset = v end})
 
 local flyToggle = PlayerGroup:AddToggle("flyhack", {Text = "Flyhack", Default = false, Callback = function(v) flyhack = v end})
@@ -3287,8 +3287,8 @@ flyToggle:AddKeyPicker("flyhack_key", {Default = "X", Text = "Fly Key", Mode = "
 PlayerGroup:AddSlider("flyhack_speed", {Text = "Fly Speed", Min = 0, Max = 50, Rounding = 1, Default = 25, Callback = function(v) flyhack_speed = v end})
 PlayerGroup:AddSlider("flyhack_speed_y", {Text = "Fly Speed Y", Min = 0, Max = 50, Rounding = 1, Default = 25, Callback = function(v) flyhack_speed_y = v end})
 
--- SPIDERMAN (ported exactly from swimhub — Toggle callback sets both vars,
--- KeyPicker uses SyncToggleState=true = swimhub's Link="flag" equivalent)
+-- SPIDERMAN (Toggle callback sets both vars,
+-- KeyPicker uses SyncToggleState=true (toggle-on-hold pattern)
 local spiderman, spiderman_key = false, false
 local spToggle = PlayerGroup:AddToggle("spiderman", {Text = "Spiderman", Default = false, Callback = function(v)
     spiderman = v
@@ -3407,7 +3407,7 @@ cheat.utility.new_renderstepped(function(delta)
         hrp.AssemblyLinearVelocity = Vector3.new(hmm.X, hrp.AssemblyLinearVelocity.Y, hmm.Z)
     end
 
-    -- SPIDERMAN (exact swimhub port): raycast 2 studs forward, если hit —
+    -- SPIDERMAN: raycast 2 studs forward, если hit —
     -- Y velocity = 30 + Climbing state
     if spiderman and spiderman_key then
         local params = RaycastParams.new()
@@ -3429,8 +3429,8 @@ cheat.utility.new_renderstepped(function(delta)
     end
 end)
 
--- NOCLIP (ported from swimhub — probe-based multi-floor clip with status UI)
--- Aliasing locals so swimhub code reads cheat.nc_state / cheat.clipActive
+-- NOCLIP (probe-based multi-floor clip with status UI)
+-- Aliasing locals so the noclip loop reads cheat.nc_state / cheat.clipActive
 cheat.nc_state = nc_state
 cheat.clipActive = nc_clipActive
 ;(function()
@@ -3869,7 +3869,7 @@ cheat.clipActive = nc_clipActive
 end)()
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 12b] SKIN CHANGER (ported from swimhub — weapons + knives only)
+-- [BLOCK 12b] SKIN CHANGER (weapons + knives only)
 -- Фильтр: ItemType == RangedWeapon или Melee. Аттачмент-эдитор выкинут.
 -- Обёрнуто в IIFE для изоляции регистров (Luau limit 200 locals/function)
 -- do...end не помогает — нужен настоящий function scope
@@ -3881,7 +3881,7 @@ local function items_list_skins()
     return ReplicatedStorage:FindFirstChild("ItemsList")
 end
 
--- Apply skin textures/materials to a model's parts (ported from swimhub dressSkin)
+-- Apply skin textures/materials to a model's parts
 cheat.dressSkin = function(model, item_name, selected_skin)
     local folder = skins_folder()
     if not model or not folder then return end
@@ -3967,7 +3967,7 @@ local function get_model_item_id(model)
         local attr = model:GetAttribute(attr_name)
         if type(attr) == "string" and attr ~= "" then return attr end
     end
-    -- 3. Model.Name itself — attachments in Project Delta are usually named exactly like
+    -- 3. Model.Name itself — attachments in the game are usually named exactly like
     --    their ItemsList entry (StockAKMN, FrontAKMN, HandleAKMN, 762x39MAG, etc.)
     local list = items_list_skins()
     if list and list:FindFirstChild(model.Name) then return model.Name end
@@ -3996,7 +3996,7 @@ local function dressSkin_all_models(parent, weapon_item, skin)
 end
 
 -- FIX (dj regression "скин с ручки/ствола/приклада/магазина пропадает после holster"):
--- Project Delta's vm contains BaseParts from MULTIPLE item_ids (receiver + each
+-- The vm contains BaseParts from MULTIPLE item_ids (receiver + each
 -- attachment). dressSkin_all_models above only catches attachment Models that are
 -- SIBLINGS of vm in Camera — but on re-equip they may be nested INSIDE vm, or the
 -- async loading may not have them as Models at the moment we fire. This function
@@ -4339,7 +4339,7 @@ local function skin_apply(item, skin)
     return n
 end
 
--- Item icon resolver (ported from swimhub)
+-- Item icon resolver
 local function skin_item_icon(name)
     local list = items_list_skins()
     if not list then return "" end
@@ -4382,10 +4382,11 @@ end
 
 -- Per-weapon skin choices (tracks all applied skins, not just current selection)
 local skin_choices = {}
+cheat.skin_choices = skin_choices  -- expose for persistence layer
 local skin_auto_apply = true
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- Standalone Skin Browser — отдельный ScreenGui, не зависит от Obsidian internals
+-- Standalone Skin Browser — separate ScreenGui, does not depend on UI library internals
 -- ═══════════════════════════════════════════════════════════════════════════
 local skin_browser_gui = Instance.new("ScreenGui")
 skin_browser_gui.Name = "ZalupaSkinBrowser"
@@ -4774,7 +4775,7 @@ auto_btn.MouseButton1Click:Connect(function()
     auto_btn.Text = "Auto: " .. (skin_auto_apply and "ON" or "OFF")
 end)
 
--- Obsidian tab: button to open browser + info
+-- Skins tab: button to open browser + info
 local SkinOpenGroup = Tabs.Skins:AddLeftGroupbox(L("grp_skin_weapons"))
 SkinOpenGroup:AddButton("OpenBrowser", {
     Text = "Open Skin Browser",
@@ -4802,15 +4803,15 @@ SkinOpenGroup:AddToggle("SkinAuto", {
 })
 
 -- Auto-apply: dress viewmodel when it changes + periodic re-stamp owned items
--- Ported from swimhub: must try both vm.Item.Name AND vm.Name as the lookup key —
--- Project Delta's vm structure varies (some vms have an Item child whose Name is the
+-- Must try both vm.Item.Name AND vm.Name as the lookup key —
+-- The vm structure varies (some vms have an Item child whose Name is the
 -- weapon id; some don't, and the vm's own Name is the weapon id). Without the fallback
 -- auto-apply silently no-ops on vms that lack a matching Item child.
 -- FIX: dress ALL Models in Camera so composite weapons (AKMN/M4/FAL with separate
 -- stock/front/handle/magazine Models) get skinned on every part, not just the receiver.
 --
 -- FIX (dj regression "skin пропадает после убирания/доставания"):
--- Project Delta spawns the vm Model first, then loads Stock/Front/Handle/Magazine
+-- The game spawns the vm Model first, then loads Stock/Front/Handle/Magazine
 -- Models into Camera asynchronously over the next few frames. Our old cache checked
 -- only `vm ~= skin_last_vm` — when the vm instance stayed the same but new attachment
 -- Models appeared, we skipped re-applying. Result: receiver skinned, attachments bare.
@@ -4901,8 +4902,8 @@ cheat.utility.new_heartbeat(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 12c] GUN EDITOR (ported from swimhub — attachment changer)
--- Standalone ScreenGui, не зависит от Obsidian internals
+-- [BLOCK 12c] GUN EDITOR (attachment changer)
+-- Standalone ScreenGui, does not depend on UI library internals
 -- ═══════════════════════════════════════════════════════════════════════════
 local function items_models()
     return ReplicatedStorage:FindFirstChild("ItemsListModels")
@@ -5601,7 +5602,7 @@ cheat.utility.new_heartbeat(function()
     pcall(wep_apply_all)
 end)
 
--- Obsidian tab: open button
+-- Skins tab: open button
 local GunOpenGroup = Tabs.Skins:AddRightGroupbox("Gun Editor")
 GunOpenGroup:AddButton("OpenGunEditor", {
     Text = "Open Gun Editor",
@@ -5659,6 +5660,134 @@ LangGroup:AddDropdown("LanguageSelect", {
 
 SaveManager:BuildConfigSection(Tabs.Settings)
 ThemeManager:ApplyToTab(Tabs.Settings)
+
+-- ─── CUSTOM STATE PERSISTENCE (skins + friends) ────────────────────────────
+-- Obsidian SaveManager only handles Library.Flags (toggle/slider values).
+-- Skins choices and friends list are stored separately as JSON files in the
+-- same ZalupaHooK folder so they survive script restarts and config loads.
+local SKINS_FILE = "ZalupaHooK/skins.json"
+local FRIENDS_FILE = "ZalupaHooK/friends.json"
+
+local function _load_json(path)
+    if not readfile then return nil end
+    local ok, content = pcall(readfile, path)
+    if not ok or type(content) ~= "string" or content == "" then return nil end
+    local ok_parse, data = pcall(function()
+        return game:GetService("HttpService"):JSONDecode(content)
+    end)
+    if ok_parse and type(data) == "table" then return data end
+    return nil
+end
+
+local function _save_json(path, data)
+    if not writefile then return false end
+    local ok, json_str = pcall(function()
+        return game:GetService("HttpService"):JSONEncode(data)
+    end)
+    if not ok or type(json_str) ~= "string" then return false end
+    pcall(writefile, path, json_str)
+    return true
+end
+
+-- Hook SaveManager.Save (manual "Save config" button) and SaveManager.Load (manual "Load config"
+-- button AND called by LoadAutoloadConfig) so custom state is preserved across all
+-- config save/load cycles.
+local _orig_Save = SaveManager.Save
+SaveManager.Save = function(self, name, ...)
+    local res = _orig_Save(self, name, ...)
+    -- Auto-save skins+friends alongside the regular config save
+    pcall(function()
+        _save_json(SKINS_FILE, cheat.skin_choices or {})
+        local friends_list = {}
+        for fname, _ in pairs(cheat.friends or {}) do table.insert(friends_list, fname) end
+        table.sort(friends_list)
+        _save_json(FRIENDS_FILE, friends_list)
+    end)
+    return res
+end
+
+local _orig_Load = SaveManager.Load
+SaveManager.Load = function(self, name, ...)
+    local res = _orig_Load(self, name, ...)
+    task.spawn(function()
+        task.wait(0.1)
+        local skins = _load_json(SKINS_FILE)
+        if skins and type(skins) == "table" and cheat.skin_choices then
+            for weapon, skin in pairs(skins) do
+                if type(weapon) == "string" and type(skin) == "string" then
+                    cheat.skin_choices[weapon] = skin
+                end
+            end
+        end
+        local friends = _load_json(FRIENDS_FILE)
+        if friends and type(friends) == "table" then
+            cheat.friends = {}
+            for _, fname in ipairs(friends) do
+                if type(fname) == "string" then
+                    cheat.friends[fname] = true
+                end
+            end
+            if cheat._refresh_friend_list then cheat._refresh_friend_list() end
+        end
+    end)
+    return res
+end
+
+-- Add a "Save Skins & Friends" button to Settings tab
+local PersistGroup = Tabs.Settings:AddRightGroupbox("Data Persistence")
+PersistGroup:AddButton("save_custom_state", {
+    Text = "Save Skins & Friends",
+    Tooltip = "Save your skin choices and friends list to disk so they survive script restarts",
+    Callback = function()
+        -- Skins
+        local skins_ok = _save_json(SKINS_FILE, cheat.skin_choices or {})
+        -- Friends
+        local friends_list = {}
+        for name, _ in pairs(cheat.friends or {}) do table.insert(friends_list, name) end
+        table.sort(friends_list)
+        local friends_ok = _save_json(FRIENDS_FILE, friends_list)
+        Library:Notify({
+            Title = "Zalupa.HooK",
+            Description = "Skins: " .. (skins_ok and "saved" or "failed") .. " | Friends: " .. (friends_ok and "saved" or "failed"),
+            Time = 4
+        })
+    end
+})
+PersistGroup:AddButton("load_custom_state", {
+    Text = "Load Skins & Friends",
+    Tooltip = "Load your previously saved skin choices and friends list",
+    Callback = function()
+        local skins = _load_json(SKINS_FILE)
+        if skins and type(skins) == "table" and cheat.skin_choices then
+            local count = 0
+            for weapon, skin in pairs(skins) do
+                if type(weapon) == "string" and type(skin) == "string" then
+                    cheat.skin_choices[weapon] = skin
+                    count = count + 1
+                end
+            end
+            Library:Notify({ Title = "Skins", Description = "Loaded " .. count .. " skin choice(s)", Time = 3 })
+        else
+            Library:Notify({ Title = "Skins", Description = "No saved skins found", Time = 3 })
+        end
+        local friends = _load_json(FRIENDS_FILE)
+        if friends and type(friends) == "table" then
+            cheat.friends = {}
+            local count = 0
+            for _, name in ipairs(friends) do
+                if type(name) == "string" then
+                    cheat.friends[name] = true
+                    count = count + 1
+                end
+            end
+            if cheat._refresh_friend_list then cheat._refresh_friend_list() end
+            Library:Notify({ Title = "Friends", Description = "Loaded " .. count .. " friend(s)", Time = 3 })
+        else
+            Library:Notify({ Title = "Friends", Description = "No saved friends found", Time = 3 })
+        end
+    end
+})
+
 SaveManager:LoadAutoloadConfig()
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -5772,11 +5901,11 @@ task.spawn(function()
 end)
 
 -- updateClient hook (recoil, spread, bob, instant aim, unlock firemodes, rapid fire)
--- Ported from pin.reta: continuous background scanner re-hooks new spring tables after respawn
+-- Continuous background scanner re-hooks new spring tables after respawn
 cheat.alive = true
 task.spawn(function()
     local got_that = false
-    -- Pin.reta-style spring table hooks (точечнее чем updateClient): recoilPos/recoilRot/cameraRecoil/walkCycle/gunSway/sway/strafeTilt/jumpTilt/jumpCameraTilt
+    -- Spring table hooks (more precise than updateClient): recoilPos/recoilRot/cameraRecoil/walkCycle/gunSway/sway/strafeTilt/jumpTilt/jumpCameraTilt
     local recoil_spring_names = {recoilPos = true, recoilRot = true, cameraRecoil = true}
     local bob_spring_names = {walkCycle = true, sprintCycle = true, gunSway = true, sway = true, strafeTilt = true, jumpTilt = true, jumpCameraTilt = true}
     local function hook_spring_table(gc)
@@ -5908,7 +6037,7 @@ task.spawn(function()
         if not got_that then task.wait(1) end
     until got_that
 
-    -- Continuous background scanner (ported from pin.reta): re-hooks new spring tables
+    -- Continuous background scanner: re-hooks new spring tables
     -- after respawn. Runs at 5s interval ONLY while norecoil OR nobob is active.
     task.spawn(function()
         local next_scan = 0
@@ -6274,12 +6403,11 @@ __namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
         end
     end
 
-    -- RAYCAST: подмена результата на hit в target_part (silent aim)
-    -- Ported from pin.reta: only intercept raycasts from the Bullet module.
-    -- This prevents breaking ESP vis-checks and other game raycasts.
+    -- RAYCAST: substitute result with hit in target_part (silent aim)
+    -- Only intercept raycasts from the Bullet module to avoid breaking ESP vis-checks.
     if method == "Raycast" then
         local origin = args[1]
-        -- Check if this raycast comes from the Bullet module (swim-style stack check)
+        -- Check if this raycast comes from the Bullet module (stack-based check)
         local from_bullet = false
         if debug and debug.traceback then
             pcall(function()
@@ -6294,7 +6422,7 @@ __namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
                     origin = silent_aim.manipulated_origin
                     args[1] = origin
                 end
-                -- pin.reta logic: force-collision gated by wallbang OR isvisible OR manipulated
+                -- Force-collision gated by wallbang OR isvisible OR manipulated
                 local can_force_collision = silent_aim.testwallbang
                     or silent_aim.isvisible
                     or silent_aim.manipulated_origin ~= nil
@@ -6458,7 +6586,7 @@ task.spawn(function()
 end)
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 17] CROSSHAIR (полная версия из pin.reta) + TARGET INFO PANEL
+-- [BLOCK 17] CROSSHAIR + TARGET INFO PANEL
 -- ═══════════════════════════════════════════════════════════════════════════
 ;(function()
     local CrosshairGroup = Tabs.Visuals:AddRightGroupbox(L("grp_crosshair"))
@@ -6773,7 +6901,7 @@ end)
             end
         end
 
-        -- Crosshair rendering (полная версия из pin.reta)
+        -- Crosshair rendering
         if cursor.Enabled then
             _rb = (_rb + delta * 0.5) % 1
             local color = cursor.Color
@@ -6885,7 +7013,7 @@ end)()
 -- ═══════════════════════════════════════════════════════════════════════════
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 20] OBJECTS ESP — Extractions + Car ESP (ported from tomboy.hook)
+-- [BLOCK 20] OBJECTS ESP — Extractions + Car ESP
 -- ═══════════════════════════════════════════════════════════════════════════
 ;(function()
     local ObjGroup = Tabs.Visuals:AddRightGroupbox(L("grp_objects_esp"))
@@ -7617,6 +7745,7 @@ end)()
             _friend_labels["_empty"] = FriendListGroup:AddLabel("No friends added")
         end
     end
+    cheat._refresh_friend_list = _update_friend_list  -- expose for persistence layer
     _update_friend_list()
 
     -- Auto-refresh when player joins/leaves while browser is open
@@ -7882,7 +8011,7 @@ end)()
 end)()
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 15c] MISC TAB — Fake Map (ported from swimhub)
+-- [BLOCK 15c] MISC TAB — Fake Map
 -- Добавляет фейковые DAGR/GPS, EstonianBorderMap, Pathfinder/Compass в инвентарь,
 -- чтобы ты всегда видел свою позицию/карту/компас в игре.
 -- IIFE для изоляции регистров (Luau limit 200 locals/function)
@@ -8381,12 +8510,12 @@ cheat.staff_detected = cheat.staff_detected or {}
 end)()
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 15e] MISC TAB — Autosort + Clean Inventory BG (ported from pin.reta)
+-- [BLOCK 15e] MISC TAB — Autosort + Clean Inventory BG
 -- ═══════════════════════════════════════════════════════════════════════════
 ;(function()
     local MiscExtrasGroup = Tabs.Misc:AddLeftGroupbox("Inventory Extras")
 
-    -- ── AUTOSORT button (ported from pin.reta) ─────────────────────────────
+    -- ── AUTOSORT button ───────────────────────────────────────────────────
     MiscExtrasGroup:AddButton("autosort", {
         Text = "Autosort Vault",
         Tooltip = "Sorts your vault: Keys → Weapons → Attachments → Ammo → Mags → Armor → Clothing → Backpacks → Fabrics → Utility → Meds → Treasure → Trash → Rubles",
@@ -8526,7 +8655,7 @@ end)()
         end
     })
 
-    -- ── CLEAN INVENTORY BG (ported from pin.reta) ──────────────────────────
+    -- ── CLEAN INVENTORY BG ─────────────────────────────────────────────────
     local clean_inv_bg = false
     local clean_inv_toggle = MiscExtrasGroup:AddToggle("clean_inv_bg", {
         Text = "Clean Inventory BG",
@@ -8583,7 +8712,7 @@ end)()
 end)()
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- [BLOCK 15f] MISC TAB — Grenade Trajectory Predictor (ported from pin.reta)
+-- [BLOCK 15f] MISC TAB — Grenade Trajectory Predictor
 -- ═══════════════════════════════════════════════════════════════════════════
 ;(function()
     local GrenadeGroup = Tabs.Misc:AddLeftGroupbox("Grenade Trajectory")
@@ -9029,9 +9158,9 @@ end
 cheat.EspLibrary.load()
 Library:Notify({
     Title = "Zalupa.HooK",
-    Description = "Tomboy Combat + pin.reta merge + crosshair/freecam/objects ESP/chams/3rd person loaded.",
+    Description = "Loaded successfully. Welcome to Zalupa.HooK v1.0 Beta.",
     Time = 5
 })
 
 -- Регистрируем инстанс для re-exec гарда (BLOCK 00 вызовет unload при повторном запуске).
-getgenv().__zalupa_v1 = cheat
+getgenv().__zalupa_v1 = cheatы
