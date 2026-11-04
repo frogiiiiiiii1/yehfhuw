@@ -9163,4 +9163,4 @@ Library:Notify({
 })
 
 -- Регистрируем инстанс для re-exec гарда (BLOCK 00 вызовет unload при повторном запуске).
-getgenv().__zalupa_v1 = cheatы
+getgenv().__zalupa_v1 = cheat
