@@ -15,6 +15,7 @@ local UserInputService  = game:GetService("UserInputService")
 local Workspace         = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting          = game:GetService("Lighting")
+local TweenService      = game:GetService("TweenService")
 local LocalPlayer       = Players.LocalPlayer
 local Camera            = Workspace.CurrentCamera
 local Mouse             = LocalPlayer:GetMouse()
@@ -134,7 +135,7 @@ end
 
 local Window = Library:CreateWindow({
     Title = "Zalupa.HooK",
-    Footer = "v1.0 Beta",
+    Footer = "v1.5 Updated",
     Icon = 95816097006870,
     NotifySide = "Right",
     ShowCustomCursor = true,
@@ -158,6 +159,7 @@ local silent_aim = {
     enabled = false, part = "Head", instant = true,
     random_part = false,
     fov = true, fov_show = false, fov_size = 150,
+    fov_color = Color3.new(1,1,1),
     target_part = nil, isvisible = false,
     nospread = false, target_npc = false, target_heli = false,
     testwallbang = false,
@@ -608,6 +610,7 @@ AimGroup:AddToggle("TargetAI", { Text = "Target AI", Default = false, Callback =
 AimGroup:AddToggle("TargetHeli", { Text = "Target Heli", Default = false, Callback = function(v) silent_aim.target_heli = v end })
 AimGroup:AddToggle("UseFOV", { Text = "Use FOV (aim only near cursor)", Default = true, Callback = function(v) silent_aim.fov = v end })
 AimGroup:AddToggle("ShowFOV", { Text = "Show FOV Circle", Default = false, Callback = function(v) silent_aim.fov_show = v end })
+    :AddColorPicker("FOVColor", { Title = "FOV Circle Color", Default = Color3.new(1,1,1), Callback = function(v) silent_aim.fov_color = v end })
 AimGroup:AddSlider("FOVSize", { Text = "FOV Size", Min = 50, Max = 600, Rounding = 1, Default = 150, Suffix = "px", Callback = function(v) silent_aim.fov_size = v end })
 AimGroup:AddToggle("RandomPart", { Text = "Randomize Hit Part", Default = false, Tooltip = "Cycle aim part every 20ms between 7 body parts to defeat static-target anticheat",
     Callback = function(v) silent_aim.random_part = v end })
@@ -3279,7 +3282,7 @@ PlayerGroup:AddToggle("speedhack", {Text = "Speedhack", Default = false, Callbac
     end
 end})
 PlayerGroup:AddToggle("speedhack_auto", {Text = "Auto Speed", Default = false, Callback = function(v) speedhack_autospeed = v end})
-PlayerGroup:AddSlider("speedhack_speed", {Text = "Speedhack Speed", Min = 1, Max = 22, Rounding = 1, Default = 18, Callback = function(v) speedhack_speed = v end})
+PlayerGroup:AddSlider("speedhack_speed", {Text = "Speedhack Speed", Min = 1, Max = 23, Rounding = 1, Default = 18, Callback = function(v) speedhack_speed = v end})
 PlayerGroup:AddSlider("speedhack_offset", {Text = "Auto Speed Offset", Min = -5, Max = 5, Rounding = 1, Default = 3, Callback = function(v) speedhack_autospeed_offset = v end})
 
 local flyToggle = PlayerGroup:AddToggle("flyhack", {Text = "Flyhack", Default = false, Callback = function(v) flyhack = v end})
@@ -3393,6 +3396,8 @@ cheat.utility.new_renderstepped(function(delta)
     if direction ~= Vector3.zero then direction = direction.Unit end
 
     local calcspeed = speedhack_autospeed and (sw_calculate_speed(hrp) + speedhack_autospeed_offset) or speedhack_speed
+    -- FIX: hard clamp to 23 — Auto Speed offset could push speed above 23 (instant ban).
+    calcspeed = math.min(calcspeed, 23)
 
     if speedhack then hum.WalkSpeed = calcspeed end
 
@@ -6340,6 +6345,7 @@ cheat.utility.new_heartbeat(function(delta)
     -- FIX: Drawing API Position — screen-space Y (нужен +GuiInset.Y к Mouse.Y)
     fovCircle.Position = Vector2.new(mouse_pos.X, mouse_pos.Y + GuiInset.Y)
     fovCircle.Radius = silent_aim.fov_size
+    fovCircle.Color = silent_aim.fov_color
     fovCircle.Visible = silent_aim.fov_show and silent_aim.enabled
 
     if packetautoshoot and silent_aim.target_part and cheat.shoot_weapon_packet then
@@ -6475,6 +6481,26 @@ __namecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
             end
             -- FIX: связываем hit effects на legit-выстрелы (не от cheat-кода)
             pcall(cheat.fire_hit_effects, tp)
+        end
+        -- UG Resolver fix: while HRP is pinned underground, override bullet
+        -- direction to point from camera (above ground) toward args[1] target.
+        -- Without this, the server uses HRP position (underground) as bullet
+        -- origin → bullet hits ground/terrain → misses target.
+        if cheat.ug_resolver_holding then
+            -- args[1] is the direction Vector3 sent to server. Re-derive it
+            -- from camera position toward the original target direction endpoint.
+            -- args[1] is a Unit vector; we keep its direction but the server
+            -- should compute the trajectory from Camera, not HRP.
+            -- The server's FireProjectile handler reads the player's character
+            -- position for trajectory. Since HRP is underground, we need to
+            -- shift the direction so the trajectory clears the ground.
+            -- Easiest fix: make args[1] point slightly upward so the bullet
+            -- arcs over the ground between camera and target.
+            local cur_dir = args[1]
+            if typeof(cur_dir) == "Vector3" then
+                -- Add upward bias so bullet doesn't immediately hit ground
+                args[1] = (cur_dir + Vector3.new(0, 0.05, 0)).Unit
+            end
         end
         setnamecallmethod(method)
         return __namecall(self, unpack(args, 1, argc))
@@ -9062,6 +9088,1325 @@ end)()
     end
 end)()
 
+-- ═══════════════════════════════════════════════════════════════════════════
+-- [BLOCK 16a] UI EXTRAS — Watermark + KeybindList + ModeratorList
+-- Standalone ScreenGuis (similar to TOMBOU's Library:Watermark/KeybindList/ModeratorList)
+-- but built without depending on Obsidian UI internals. All draggable.
+-- ═══════════════════════════════════════════════════════════════════════════
+;(function()
+    -- ── Watermark ─────────────────────────────────────────────────────────
+    -- Top-center pill showing script name + version + FPS.
+    local wm_gui = Instance.new("ScreenGui")
+    wm_gui.Name = "ZalupaWatermark"
+    wm_gui.ResetOnSpawn = false
+    wm_gui.IgnoreGuiInset = true
+    wm_gui.DisplayOrder = 200
+    wm_gui.Enabled = true
+    pcall(function() wm_gui.Parent = game:GetService("CoreGui") end)
+    if not wm_gui.Parent then wm_gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+    cheat.utility.track_gui(wm_gui)
+
+    local wm_frame = Instance.new("Frame", wm_gui)
+    wm_frame.Name = "Watermark"
+    wm_frame.AnchorPoint = Vector2.new(0.5, 0)
+    wm_frame.Position = UDim2.new(0.5, 0, 0, 8)
+    wm_frame.Size = UDim2.fromOffset(220, 26)
+    wm_frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    wm_frame.BackgroundTransparency = 0.05
+    wm_frame.BorderSizePixel = 0
+    local wm_corner = Instance.new("UICorner", wm_frame)
+    wm_corner.CornerRadius = UDim.new(0, 4)
+    local wm_stroke = Instance.new("UIStroke", wm_frame)
+    wm_stroke.Color = Color3.fromRGB(160, 80, 220)
+    wm_stroke.Thickness = 1
+    wm_stroke.Transparency = 0.2
+    local wm_accent = Instance.new("Frame", wm_frame)
+    wm_accent.Size = UDim2.new(1, 0, 0, 2)
+    wm_accent.BackgroundColor3 = Color3.fromRGB(160, 80, 220)
+    wm_accent.BorderSizePixel = 0
+    local wm_text = Instance.new("TextLabel", wm_frame)
+    wm_text.BackgroundTransparency = 1
+    wm_text.Size = UDim2.new(1, -16, 1, 0)
+    wm_text.Position = UDim2.new(0, 8, 0, 0)
+    wm_text.Font = Enum.Font.GothamBold
+    wm_text.TextSize = 13
+    wm_text.TextColor3 = Color3.fromRGB(240, 240, 240)
+    wm_text.TextXAlignment = Enum.TextXAlignment.Left
+    wm_text.Text = "Zalupa.HooK v1.5 Updated | 0 FPS"
+
+    -- Watermark drag
+    do
+        local dragging, drag_start, start_pos = false, nil, nil
+        wm_frame.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true; drag_start = input.Position; start_pos = wm_frame.Position
+            end
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local delta = input.Position - drag_start
+                wm_frame.Position = UDim2.new(
+                    start_pos.X.Scale, start_pos.X.Offset + delta.X,
+                    start_pos.Y.Scale, start_pos.Y.Offset + delta.Y
+                )
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+        end)
+    end
+
+    -- Watermark FPS counter (every 0.5s)
+    local wm_fps_frames = 0
+    local wm_fps_last = os.clock()
+    cheat.utility.new_heartbeat(function(delta)
+        wm_fps_frames = wm_fps_frames + 1
+    end)
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            local now = os.clock()
+            local fps = math.floor(wm_fps_frames / (now - wm_fps_last))
+            wm_fps_frames = 0
+            wm_fps_last = now
+            if wm_text.Parent then
+                wm_text.Text = "Zalupa.HooK v1.5 Updated | " .. tostring(fps) .. " FPS"
+            end
+        end
+    end)
+
+    -- ── KeybindList ───────────────────────────────────────────────────────
+    -- Left-side panel showing active keybinds. Users register entries with
+    -- cheat.keybind_list:add(name, key, is_active_fn) — the entry shows only
+    -- when its is_active_fn returns true (so we only display toggles currently ON).
+    local kl_gui = Instance.new("ScreenGui")
+    kl_gui.Name = "ZalupaKeybindList"
+    kl_gui.ResetOnSpawn = false
+    kl_gui.IgnoreGuiInset = true
+    kl_gui.DisplayOrder = 199
+    kl_gui.Enabled = true
+    pcall(function() kl_gui.Parent = game:GetService("CoreGui") end)
+    if not kl_gui.Parent then kl_gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+    cheat.utility.track_gui(kl_gui)
+
+    local kl_frame = Instance.new("Frame", kl_gui)
+    kl_frame.Name = "KeybindList"
+    kl_frame.AnchorPoint = Vector2.new(0, 0.5)
+    kl_frame.Position = UDim2.new(0, 12, 0.5, 0)
+    kl_frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    kl_frame.BackgroundTransparency = 0.05
+    kl_frame.BorderSizePixel = 0
+    kl_frame.AutomaticSize = Enum.AutomaticSize.Y
+    kl_frame.Size = UDim2.fromOffset(240, 0)
+    local kl_corner = Instance.new("UICorner", kl_frame)
+    kl_corner.CornerRadius = UDim.new(0, 4)
+    local kl_stroke = Instance.new("UIStroke", kl_frame)
+    kl_stroke.Color = Color3.fromRGB(60, 60, 70)
+    kl_stroke.Thickness = 1
+    local kl_accent = Instance.new("Frame", kl_frame)
+    kl_accent.Size = UDim2.new(1, 0, 0, 2)
+    kl_accent.BackgroundColor3 = Color3.fromRGB(160, 80, 220)
+    kl_accent.BorderSizePixel = 0
+    local kl_pad = Instance.new("UIPadding", kl_frame)
+    kl_pad.PaddingTop = UDim.new(0, 10)
+    kl_pad.PaddingBottom = UDim.new(0, 8)
+    kl_pad.PaddingLeft = UDim.new(0, 8)
+    kl_pad.PaddingRight = UDim.new(0, 8)
+    local kl_title = Instance.new("TextLabel", kl_frame)
+    kl_title.BackgroundTransparency = 1
+    kl_title.Size = UDim2.new(1, 0, 0, 16)
+    kl_title.Font = Enum.Font.GothamBold
+    kl_title.TextSize = 12
+    kl_title.TextColor3 = Color3.fromRGB(240, 240, 240)
+    kl_title.TextXAlignment = Enum.TextXAlignment.Left
+    kl_title.Text = "Keybinds"
+    local kl_div = Instance.new("Frame", kl_frame)
+    kl_div.Position = UDim2.new(0, 0, 0, 22)
+    kl_div.Size = UDim2.new(1, 0, 0, 1)
+    kl_div.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    kl_div.BorderSizePixel = 0
+    local kl_content = Instance.new("Frame", kl_frame)
+    kl_content.BackgroundTransparency = 1
+    kl_content.Position = UDim2.new(0, 0, 0, 30)
+    kl_content.AutomaticSize = Enum.AutomaticSize.Y
+    kl_content.Size = UDim2.new(1, 0, 0, 0)
+    local kl_layout = Instance.new("UIListLayout", kl_content)
+    kl_layout.Padding = UDim.new(0, 4)
+    kl_layout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    -- KeybindList drag
+    do
+        local dragging, drag_start, start_pos = false, nil, nil
+        kl_title.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true; drag_start = input.Position; start_pos = kl_frame.Position
+            end
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local delta = input.Position - drag_start
+                kl_frame.Position = UDim2.new(
+                    start_pos.X.Scale, start_pos.X.Offset + delta.X,
+                    start_pos.Y.Scale, start_pos.Y.Offset + delta.Y
+                )
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+        end)
+    end
+
+    -- ── KeybindList: shows ALL keybinds with name + key + mode ────────────
+    -- Scans Library.Options (Obsidian UI's option registry) for keypicker
+    -- entries and displays each one with its display name, bound key, and mode.
+    -- Active (currently ON) keybinds are highlighted in purple.
+    local kl_labels = {}
+
+    -- Known keybind flag names → display names
+    local kl_known = {
+        MenuKey        = "Menu Toggle",
+        ChargeShotKey  = "Charge Shot",
+        InvCheckerKey  = "Inventory Checker",
+        zoom_key       = "Zoom",
+        flyhack_key    = "Fly Hack",
+        spiderman_key  = "Spiderman",
+        noclip_key     = "Noclip",
+        fc_key         = "Freecam",
+        mv_tp_key      = "Third Person",
+        aa_key         = "Anti Aim",
+    }
+
+    -- Periodic refresh: scan Library.Options for all keypicker entries
+    -- Obsidian stores keypickers in Library.Options[flag] with fields:
+    --   .Value (key string), .Mode ("Toggle"/"Hold"/"Always"), .Text (label),
+    --   .Toggled (bool — for Hold mode reflects current key-down state).
+    -- For Toggle-mode keypickers bound to a parent Toggle (SyncToggleState),
+    -- the active state is read from Library.Toggles[parent_flag].Value.
+    task.spawn(function()
+        while true do
+            task.wait(0.3)
+            local entries = {}
+            if Library and Library.Options then
+                for flag_name, opt in pairs(Library.Options) do
+                    -- Detect keypicker: has .Value (string), .Mode (string),
+                    -- and is not a colorpicker/slider/dropdown (those don't have .Mode).
+                    if type(opt) == "table" and type(opt.Value) == "string"
+                        and type(opt.Mode) == "string" and opt.Value ~= nil then
+                        local display_name = opt.Text or kl_known[flag_name] or flag_name
+                        local key_str = tostring(opt.Value)
+                        if key_str == "Backspace" or key_str == "" then key_str = "None" end
+                        -- FIX: only show keybinds the user actually bound (skip "None"/"Unknown")
+                        if key_str ~= "None" and key_str ~= "Unknown" then
+                            local mode = opt.Mode or "Toggle"
+                            -- Determine active state
+                            local active = false
+                            if opt.Toggled == true then active = true end
+                            entries[#entries + 1] = {
+                                name = display_name,
+                                key = key_str,
+                                mode = mode,
+                                active = active,
+                            }
+                        end
+                    end
+                end
+            end
+            -- Sort alphabetically by name
+            table.sort(entries, function(a, b) return a.name:lower() < b.name:lower() end)
+
+            -- Recycle labels
+            while #kl_labels < #entries do
+                local lbl = Instance.new("TextLabel")
+                lbl.BackgroundTransparency = 1
+                lbl.Size = UDim2.new(1, 0, 0, 16)
+                lbl.Font = Enum.Font.Gotham
+                lbl.TextSize = 11
+                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                lbl.RichText = true
+                lbl.Parent = kl_content
+                kl_labels[#kl_labels + 1] = lbl
+            end
+            for i, lbl in ipairs(kl_labels) do
+                if i <= #entries then
+                    local e = entries[i]
+                    local name_color = e.active and "#A050DC" or "#DCDCDC"
+                    local mode_color = e.active and "#A050DC" or "#787878"
+                    lbl.Text = string.format(
+                        '<font color="%s">%s</font>  <font color="#999999">[%s]</font>  <font color="%s">[%s]</font>',
+                        name_color, e.name, e.key, mode_color, e.mode
+                    )
+                    lbl.LayoutOrder = i
+                    lbl.Visible = true
+                else
+                    lbl.Visible = false
+                end
+            end
+        end
+    end)
+
+    -- ── ModeratorList ─────────────────────────────────────────────────────
+    -- Right-side panel showing detected moderators (integrates with cheat.staff_detected
+    -- populated by the Staff Detector in BLOCK 15d).
+    local ml_gui = Instance.new("ScreenGui")
+    ml_gui.Name = "ZalupaModeratorList"
+    ml_gui.ResetOnSpawn = false
+    ml_gui.IgnoreGuiInset = true
+    ml_gui.DisplayOrder = 198
+    ml_gui.Enabled = true
+    pcall(function() ml_gui.Parent = game:GetService("CoreGui") end)
+    if not ml_gui.Parent then ml_gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+    cheat.utility.track_gui(ml_gui)
+
+    local ml_frame = Instance.new("Frame", ml_gui)
+    ml_frame.Name = "ModeratorList"
+    ml_frame.AnchorPoint = Vector2.new(1, 0.5)
+    ml_frame.Position = UDim2.new(1, -12, 0.5, 0)
+    ml_frame.BackgroundColor3 = Color3.fromRGB(18, 18, 22)
+    ml_frame.BackgroundTransparency = 0.05
+    ml_frame.BorderSizePixel = 0
+    ml_frame.AutomaticSize = Enum.AutomaticSize.Y
+    ml_frame.Size = UDim2.fromOffset(200, 0)
+    local ml_corner = Instance.new("UICorner", ml_frame)
+    ml_corner.CornerRadius = UDim.new(0, 4)
+    local ml_stroke = Instance.new("UIStroke", ml_frame)
+    ml_stroke.Color = Color3.fromRGB(60, 60, 70)
+    ml_stroke.Thickness = 1
+    local ml_accent = Instance.new("Frame", ml_frame)
+    ml_accent.Size = UDim2.new(1, 0, 0, 2)
+    ml_accent.BackgroundColor3 = Color3.fromRGB(160, 80, 220)
+    ml_accent.BorderSizePixel = 0
+    local ml_pad = Instance.new("UIPadding", ml_frame)
+    ml_pad.PaddingTop = UDim.new(0, 10)
+    ml_pad.PaddingBottom = UDim.new(0, 8)
+    ml_pad.PaddingLeft = UDim.new(0, 8)
+    ml_pad.PaddingRight = UDim.new(0, 8)
+    local ml_title = Instance.new("TextLabel", ml_frame)
+    ml_title.BackgroundTransparency = 1
+    ml_title.Size = UDim2.new(1, 0, 0, 16)
+    ml_title.Font = Enum.Font.GothamBold
+    ml_title.TextSize = 12
+    ml_title.TextColor3 = Color3.fromRGB(240, 240, 240)
+    ml_title.TextXAlignment = Enum.TextXAlignment.Left
+    ml_title.Text = "Moderators"
+    local ml_div = Instance.new("Frame", ml_frame)
+    ml_div.Position = UDim2.new(0, 0, 0, 22)
+    ml_div.Size = UDim2.new(1, 0, 0, 1)
+    ml_div.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+    ml_div.BorderSizePixel = 0
+    local ml_content = Instance.new("Frame", ml_frame)
+    ml_content.BackgroundTransparency = 1
+    ml_content.Position = UDim2.new(0, 0, 0, 30)
+    ml_content.AutomaticSize = Enum.AutomaticSize.Y
+    ml_content.Size = UDim2.new(1, 0, 0, 0)
+    local ml_layout = Instance.new("UIListLayout", ml_content)
+    ml_layout.Padding = UDim.new(0, 4)
+
+    -- ModeratorList drag
+    do
+        local dragging, drag_start, start_pos = false, nil, nil
+        ml_title.InputBegan:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging = true; drag_start = input.Position; start_pos = ml_frame.Position
+            end
+        end)
+        UserInputService.InputChanged:Connect(function(input)
+            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                local delta = input.Position - drag_start
+                ml_frame.Position = UDim2.new(
+                    start_pos.X.Scale, start_pos.X.Offset + delta.X,
+                    start_pos.Y.Scale, start_pos.Y.Offset + delta.Y
+                )
+            end
+        end)
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
+        end)
+    end
+
+    -- Periodic refresh: pull from cheat.staff_detected
+    local ml_labels = {}
+    task.spawn(function()
+        while true do
+            task.wait(0.5)
+            local mods = {}
+            if cheat.staff_detected then
+                for player, info in pairs(cheat.staff_detected) do
+                    if player and player.Parent then
+                        mods[#mods + 1] = { name = player.Name, role = info.role or info.type or "Mod" }
+                    end
+                end
+            end
+            table.sort(mods, function(a, b) return a.name:lower() < b.name:lower() end)
+            -- Recycle labels
+            while #ml_labels < #mods do
+                local lbl = Instance.new("TextLabel")
+                lbl.BackgroundTransparency = 1
+                lbl.Size = UDim2.new(1, 0, 0, 14)
+                lbl.Font = Enum.Font.Gotham
+                lbl.TextSize = 11
+                lbl.TextColor3 = Color3.fromRGB(220, 220, 220)
+                lbl.TextXAlignment = Enum.TextXAlignment.Left
+                lbl.RichText = true
+                lbl.Parent = ml_content
+                ml_labels[#ml_labels + 1] = lbl
+            end
+            for i, lbl in ipairs(ml_labels) do
+                if i <= #mods then
+                    local m = mods[i]
+                    local role_color = "#FF5050"
+                    if m.role == "tester" then role_color = "#64C8FF"
+                    elseif m.role == "content_creator" then role_color = "#FFC864"
+                    elseif m.role == "alt_mod" then role_color = "#FF9632" end
+                    lbl.Text = string.format('<font color="#FFFFFF">%s</font>  <font color="%s">[%s]</font>',
+                        m.name, role_color, m.role)
+                    lbl.Visible = true
+                else
+                    lbl.Visible = false
+                end
+            end
+        end
+    end)
+
+    -- Add UI toggles in Settings tab to show/hide each component
+    local UiExtrasGroup = Tabs.Settings:AddRightGroupbox("UI Extras")
+    UiExtrasGroup:AddToggle("ui_watermark", {
+        Text = "Show Watermark",
+        Default = true,
+        Callback = function(v) wm_gui.Enabled = v end
+    })
+    UiExtrasGroup:AddToggle("ui_keybindlist", {
+        Text = "Show Keybind List",
+        Default = true,
+        Callback = function(v) kl_gui.Enabled = v end
+    })
+    UiExtrasGroup:AddToggle("ui_modlist", {
+        Text = "Show Moderator List",
+        Default = true,
+        Callback = function(v) ml_gui.Enabled = v end
+    })
+end)()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- [BLOCK 16b] REAL_CFRAME FOUNDATION — __index hook for HRP.CFrame/Position
+-- Saves real HRP position before spoofing (Anti-Aim / Fake Lag). The __index
+-- hook returns real_CFrame for HRP reads so external systems (game anticheat,
+-- networking) see the real position while the player visually appears elsewhere.
+-- ═══════════════════════════════════════════════════════════════════════════
+;(function()
+    cheat.real_CFrame           = nil
+    cheat.is_dead_or_respawning  = false
+    cheat.last_fly_or_tp_time    = 0
+
+    -- Track fly/TP state so we know when to suppress real_CFrame (during fly/tp
+    -- the HRP CFrame is the player's actual intended position — no spoofing).
+    -- Note: flyhack is a file-scoped local from BLOCK 12; we read it via upvalue.
+    cheat.is_flying_or_tp = function()
+        local fly_active = flyhack == true  -- upvalue from BLOCK 12
+        if fly_active then
+            cheat.last_fly_or_tp_time = tick()
+            cheat.real_CFrame = nil
+            return true
+        elseif cheat.last_fly_or_tp_time > 0 and (tick() - cheat.last_fly_or_tp_time < 1.2) then
+            cheat.real_CFrame = nil
+            return true
+        end
+        return false
+    end
+
+    -- Track character death/respawn
+    local char = LocalPlayer.Character
+    if char and char:FindFirstChildOfClass("Humanoid") and char:FindFirstChildOfClass("Humanoid").Health <= 0 then
+        cheat.is_dead_or_respawning = true
+    end
+    cheat.utility.track_conn(LocalPlayer.CharacterAdded:Connect(function()
+        cheat.is_dead_or_respawning = true
+        task.delay(0.6, function() cheat.is_dead_or_respawning = false end)
+    end))
+
+    -- NOTE: No __index hook and no renderstep restore.
+    -- Anti-Aim only changes YAW (preserves position), like swim.lua does.
+    -- This means there's no position spoof to restore, and no need for a
+    -- real_CFrame hook. The server sees the modified yaw directly.
+end)()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- [BLOCK 16c] ANTI-AIM + FAKE LAG + UG RESOLVER + RESOLVE DESYNC
+-- Mirrors TOMBOU's Anti-Aim system. Uses real_CFrame from BLOCK 16b.
+-- Modes: Reverse / Spin / Random / FlatRandom / None
+-- Fake Lag: snapshots HRP at intervals, holds HRP at last snapshot
+-- UG Resolver: hold X to pin HRP underground
+-- Resolve Desync: snaps OTHER players to their LastVerifiedPos
+-- ═══════════════════════════════════════════════════════════════════════════
+;(function()
+    -- Anti-Aim state
+    local aa_enabled = false
+    local aa_mode = "Reverse"
+    local aa_yaw_offset = 0
+    local aa_pitch_value = 0
+    cheat.aa_enabled = false  -- exposed for is_flying_or_tp / __index check
+
+    -- Fake Lag state
+    local fake_lag_enabled = false
+    local fake_lag_interval = 0.4
+    local fake_lag_cframe = nil
+    local last_fake_lag_time = 0
+    local visualize_server_pos = false
+    local visualize_color = Color3.fromRGB(255, 50, 50)
+    local visualize_transparency = 0
+    cheat.fake_lag_enabled = false  -- exposed for __index check
+
+    -- UG Resolver state
+    local ug_resolver_enabled = false
+    local ug_resolver_holding = false
+    local ug_resolver_depth = 30
+    local ug_resolver_entry_cf = nil
+    cheat.ug_resolver_holding = false  -- exposed for __namecall bullet origin fix
+
+    -- Resolve Desync state
+    local resolve_desync = false
+
+    -- Floor clip and custom offset removed per user request
+
+    -- AA + Fake Lag renderstepped (matches swim.lua exactly)
+    -- Uses new_renderstepped like swim, NOT new_heartbeat.
+    cheat.utility.new_renderstepped(function(delta)
+        if not aa_enabled and not fake_lag_enabled then return end
+        local char = LocalPlayer.Character
+        if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hum or not hrp then return end
+        if hum.Health <= 0 then return end
+
+        hum.AutoRotate = not aa_enabled
+        if aa_enabled then
+            hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+            hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+
+            local _, calc_yaw, _ = Camera.CFrame:ToOrientation()
+
+            if aa_mode == "Reverse" then
+                calc_yaw = calc_yaw + math.rad(180)
+            elseif aa_mode == "Spin" then
+                calc_yaw = calc_yaw + ((tick() * 10) % (math.pi * 2))
+            elseif aa_mode == "Random" then
+                calc_yaw = calc_yaw + math.rad(math.random(-120, 120))
+            elseif aa_mode == "FlatRandom" then
+                calc_yaw = math.rad(math.random(0, 360))
+            end
+
+            calc_yaw = calc_yaw + math.rad(aa_yaw_offset)
+
+            local hrp_x, _, hrp_z = hrp.CFrame:ToOrientation()
+            if aa_mode == "FlatRandom" then
+                hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(hrp_x, calc_yaw, hrp_z) * CFrame.Angles(math.rad(90), 0, 0)
+            else
+                hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(hrp_x, calc_yaw, hrp_z)
+            end
+
+            pcall(function()
+                local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+                if remotes and remotes:FindFirstChild("UpdateTilt") then
+                    remotes.UpdateTilt:FireServer(aa_pitch_value, 0)
+                end
+            end)
+        end
+
+        -- Fake Lag: snapshot + visualize ghost
+        if fake_lag_enabled then
+            local now_fl = tick()
+            if now_fl - last_fake_lag_time >= fake_lag_interval then
+                last_fake_lag_time = now_fl
+                fake_lag_cframe = hrp.CFrame
+                if visualize_server_pos then
+                    task.spawn(function()
+                        local oldA = char.Archivable
+                        char.Archivable = true
+                        local ghost = char:Clone()
+                        char.Archivable = oldA
+                        if ghost then
+                            ghost.Name = "FakeLagGhost_ESP_IGNORE"
+                            for _, v in pairs(ghost:GetDescendants()) do
+                                if v:IsA("BasePart") then
+                                    v.Material = Enum.Material.ForceField
+                                    v.Color = visualize_color
+                                    v.CanCollide = false
+                                    v.CanTouch = false
+                                    v.CanQuery = false
+                                    v.Massless = true
+                                    v.Anchored = true
+                                    v.Transparency = visualize_transparency
+                                elseif v:IsA("Decal") or v:IsA("Texture") or v:IsA("Clothing")
+                                    or v:IsA("Accessory") or v:IsA("Script") or v:IsA("LocalScript")
+                                    or v:IsA("SurfaceAppearance") then
+                                    v:Destroy()
+                                end
+                            end
+                            local gHum = ghost:FindFirstChildOfClass("Humanoid")
+                            if gHum then gHum:Destroy() end
+                            ghost.Parent = workspace.Terrain
+                            if ghost:FindFirstChild("HumanoidRootPart") then
+                                ghost:PivotTo(fake_lag_cframe)
+                            end
+                            local fade = 0.5
+                            local tween_info = TweenInfo.new(fade, Enum.EasingStyle.Linear)
+                            for _, v in pairs(ghost:GetDescendants()) do
+                                if v:IsA("BasePart") then
+                                    TweenService:Create(v, tween_info, { Transparency = 1 }):Play()
+                                end
+                            end
+                            task.delay(fade, function() if ghost then ghost:Destroy() end end)
+                        end
+                    end)
+                end
+            end
+        else
+            fake_lag_cframe = nil
+        end
+    end)
+
+    -- UG Resolver RenderStep: pin HRP underground while key held
+    RunService:BindToRenderStep("UGResolverRS", Enum.RenderPriority.Last.Value + 1, function()
+        if not ug_resolver_holding then return end
+        local char = LocalPlayer.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local baseY = ug_resolver_entry_cf and ug_resolver_entry_cf.Position.Y or hrp.Position.Y
+        local targetPos = Vector3.new(hrp.Position.X, baseY - ug_resolver_depth, hrp.Position.Z)
+        pcall(function()
+            hrp.CFrame = CFrame.new(targetPos) * CFrame.Angles(0, select(2, hrp.CFrame:ToOrientation()), 0)
+        end)
+    end)
+
+    -- UG Resolver keybind: reads the key assigned in the keypicker UI
+    -- and checks UserInputService:IsKeyDown directly for reliable Hold detection.
+    local function get_ug_key()
+        if Library and Library.Options and Library.Options["ug_resolver_key"] then
+            local kp = Library.Options["ug_resolver_key"]
+            -- kp.Value is the key name string like "J" or "RightShift"
+            local key_str = kp.Value
+            if key_str and key_str ~= "None" and key_str ~= "Unknown" then
+                local kc = Enum.KeyCode[key_str]
+                if kc then return kc end
+            end
+        end
+        return nil
+    end
+
+    cheat.utility.new_heartbeat(function()
+        if not ug_resolver_enabled then
+            if ug_resolver_holding then
+                ug_resolver_holding = false
+                cheat.ug_resolver_holding = false
+                local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                if hum then
+                    hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+                    hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+                end
+            end
+            return
+        end
+
+        local ug_key = get_ug_key()
+        local should_hold = ug_key and UserInputService:IsKeyDown(ug_key) or false
+
+        if should_hold and not ug_resolver_holding then
+            -- Key pressed — start UG
+            local hrp2 = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            ug_resolver_entry_cf = hrp2 and hrp2.CFrame or nil
+            ug_resolver_holding = true
+            cheat.ug_resolver_holding = true
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, false)
+                hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
+                hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
+                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+            end
+        elseif not should_hold and ug_resolver_holding then
+            -- Key released — restore
+            ug_resolver_holding = false
+            cheat.ug_resolver_holding = false
+            local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                hum:SetStateEnabled(Enum.HumanoidStateType.Freefall, true)
+                hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
+            end
+            local hrp2 = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if hrp2 and ug_resolver_entry_cf then
+                local restorePos = Vector3.new(hrp2.Position.X, ug_resolver_entry_cf.Position.Y, hrp2.Position.Z)
+                pcall(function()
+                    hrp2.CFrame = CFrame.new(restorePos) * CFrame.Angles(0, select(2, hrp2.CFrame:ToOrientation()), 0)
+                end)
+            end
+            ug_resolver_entry_cf = nil
+        end
+    end)
+
+    -- Resolve Desync: snap OTHER players' HRP to LastVerifiedPos
+    local rep_players = ReplicatedStorage:WaitForChild("Players", 10)
+    cheat.utility.new_renderstepped(function()
+        if not resolve_desync then return end
+        if not rep_players then return end
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player ~= LocalPlayer then
+                local character = player.Character
+                local root = character and character:FindFirstChild("HumanoidRootPart")
+                if root then
+                    local p_folder = rep_players:FindFirstChild(player.Name)
+                    local status = p_folder and p_folder:FindFirstChild("Status")
+                    local uac = status and status:FindFirstChild("UAC")
+                    if uac then
+                        local lastpos = uac:GetAttribute("LastVerifiedPos")
+                        if lastpos and typeof(lastpos) == "Vector3" then
+                            root.CFrame = (root.CFrame - root.Position) + lastpos
+                        end
+                    end
+                end
+            end
+        end
+    end)
+
+    -- ── Combat tab: Anti-Aim section ──────────────────────────────────────
+    local AAGroup = Tabs.Combat:AddRightGroupbox("Anti Aim")
+    local aa_toggle = AAGroup:AddToggle("aa_enabled", {
+        Text = "Enable Anti Aim",
+        Default = false,
+        Callback = function(v)
+            aa_enabled = v
+            cheat.aa_enabled = v
+            if not v then
+                local c = LocalPlayer.Character
+                if c and c:FindFirstChildOfClass("Humanoid") then
+                    c.Humanoid.AutoRotate = true
+                end
+            end
+        end
+    })
+    aa_toggle:AddKeyPicker("aa_key", {
+        Default = "None",
+        Text = "Anti Aim Key",
+        Mode = "Toggle",
+        SyncToggleState = true,
+    })
+    AAGroup:AddDropdown("aa_mode", {
+        Text = "Mode",
+        Values = {"Reverse", "Spin", "Random", "FlatRandom", "None"},
+        Default = "Reverse",
+        Callback = function(v) aa_mode = v end
+    })
+    AAGroup:AddSlider("aa_yaw", {
+        Text = "Yaw Offset", Min = -360, Max = 360, Rounding = 0, Default = 0,
+        Callback = function(v) aa_yaw_offset = v end
+    })
+    AAGroup:AddSlider("aa_pitch", {
+        Text = "Pitch Tilt", Min = -250, Max = 250, Rounding = 0, Default = 0,
+        Callback = function(v) aa_pitch_value = v end
+    })
+
+    -- ── Fake Lag ──────────────────────────────────────────────────────────
+    AAGroup:AddToggle("fakelag_on", {
+        Text = "Fake Lag",
+        Default = false,
+        Callback = function(v)
+            fake_lag_enabled = v
+            cheat.fake_lag_enabled = v
+        end
+    })
+    AAGroup:AddSlider("fakelag_int", {
+        Text = "Fake Lag Interval", Min = 1, Max = 7, Rounding = 1, Default = 4,
+        Callback = function(v) fake_lag_interval = v / 10 end
+    })
+    AAGroup:AddToggle("vis_server_pos", {
+        Text = "Visualize Fake Lag Pos",
+        Default = false,
+        Callback = function(v) visualize_server_pos = v end
+    }):AddColorPicker("vis_server_color", {
+        Default = Color3.fromRGB(255, 50, 50),
+        Callback = function(v) visualize_color = v end
+    })
+    AAGroup:AddSlider("vis_server_trans", {
+        Text = "Ghost Transparency", Min = 0, Max = 100, Rounding = 0, Default = 0,
+        Callback = function(v) visualize_transparency = v / 100 end
+    })
+
+    -- ── UG Resolver ───────────────────────────────────────────────────────
+    local ug_toggle = AAGroup:AddToggle("ug_resolver_tog", {
+        Text = "UG Resolver",
+        Default = false,
+        Callback = function(v)
+            ug_resolver_enabled = v
+            if not v then ug_resolver_holding = false end
+        end
+    })
+    ug_toggle:AddKeyPicker("ug_resolver_key", {
+        Default = "J",
+        Text = "UG Resolver Key",
+        Mode = "Hold",
+        SyncToggleState = true,
+    })
+    AAGroup:AddSlider("ug_resolver_d", {
+        Text = "UG Resolver Depth", Min = 5, Max = 100, Rounding = 0, Default = 30,
+        Callback = function(v) ug_resolver_depth = v end
+    })
+
+    -- ── Resolve Desync ────────────────────────────────────────────────────
+    AAGroup:AddToggle("resolve_desync_tog", {
+        Text = "Resolve Desync",
+        Default = false,
+        Tooltip = "Snap other players to their LastVerifiedPos (anti-desync)",
+        Callback = function(v) resolve_desync = v end
+    })
+
+    -- Note: Anti-Aim / Fake Lag / UG Resolver / Resolve Desync don't have
+    -- keypicker flags, so they won't appear in the KeybindList. They are
+    -- toggle-only features (no keybind). UG Resolver uses hardcoded Hold X.
+    -- The KeybindList auto-scans Library.Flags for all keypicker entries.
+end)()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- [BLOCK 16g] DESYNC — ported from swim.lua
+-- Spoofs HRP position in Heartbeat, restores in RenderStepped.
+-- Uses NetworkIsSleeping + physics rate manipulation to prevent server kick.
+-- ═══════════════════════════════════════════════════════════════════════════
+;(function()
+    local desync_enabled = false
+    local old_cframe = nil
+    local old_velocity = nil
+    local replicated_hrp_cframe = nil
+    cheat.desync_enabled = false
+
+    -- Anti-kick: physics rate + NetworkIsSleeping
+    local desync_turned_on = false
+    local desync_freeze_factor = 100
+    local original_rate = nil
+    local original_bandwidth = nil
+    local is_sleeping = false
+    local sleep_old = 0
+
+    -- Save original physics rates
+    pcall(function()
+        original_rate = getfflag("S2PhysicsSenderRate")
+        original_bandwidth = getfflag("PhysicsSenderMaxBandwidthBps")
+    end)
+
+    local function set_physics_rate(rate, bandwidth)
+        pcall(function()
+            setfflag("S2PhysicsSenderRate", tostring(rate))
+            setfflag("PhysicsSenderMaxBandwidthBps", tostring(bandwidth))
+        end)
+    end
+
+    -- Settings
+    local desync_visualize = false
+    local desync_x_offset, desync_y_offset, desync_z_offset = 0, 0, 0
+    local desync_x_rotate, desync_y_rotate, desync_z_rotate = 0, 0, 0
+    local desync_random_rotation, desync_random_position = false, false
+    local desync_random_position_range = 5
+    local desync_velocity = false
+    local desync_velocity_x, desync_velocity_y, desync_velocity_z = 0, 0, 0
+
+    -- No __index hook — it causes menu/UI to see stale positions (menu teleport bug).
+    -- Desync works without it: Heartbeat spoofs → RenderStepped:Wait() → restore.
+    -- NetworkIsSleeping prevents the server from seeing the spoof and kicking.
+
+    -- Desync Heartbeat: spoof → restore → yield → re-spoof pattern
+    -- This ensures camera sees the REAL position during render, not the spoof.
+    -- The server still gets the spoof because networking runs between Heartbeat
+    -- and RenderStepped.
+    cheat.utility.track_conn(RunService.Heartbeat:Connect(function()
+        replicated_hrp_cframe = nil
+        local character = LocalPlayer.Character
+        if not character then return end
+        local humanoid = character:FindFirstChildOfClass("Humanoid")
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+
+        if not (humanoid and hrp) then return end
+        if humanoid.Health <= 0 then return end
+        if not desync_enabled then return end
+
+        -- Save real position
+        old_cframe = hrp.CFrame
+        old_velocity = hrp.AssemblyLinearVelocity
+
+        -- Apply spoof
+        local hrp_offset = CFrame.new(
+            desync_x_offset,
+            desync_y_offset,
+            desync_z_offset
+        ) * CFrame.Angles(
+            desync_x_rotate,
+            desync_y_rotate,
+            desync_z_rotate
+        )
+        if desync_random_position then
+            hrp_offset = hrp_offset + (
+                CFrame.Angles(
+                    (math.random() - math.random()) * 2 * math.pi,
+                    (math.random() - math.random()) * 2 * math.pi,
+                    (math.random() - math.random()) * 2 * math.pi
+                ) * CFrame.new(0, 0, -desync_random_position_range)
+            ).Position
+        end
+        if desync_random_rotation then
+            hrp_offset = hrp_offset * CFrame.Angles(
+                (math.random() - math.random()) * 2 * math.pi,
+                (math.random() - math.random()) * 2 * math.pi,
+                (math.random() - math.random()) * 2 * math.pi
+            )
+        end
+
+        replicated_hrp_cframe = old_cframe * hrp_offset
+        hrp.CFrame = replicated_hrp_cframe
+
+        if desync_velocity then
+            hrp.AssemblyLinearVelocity = Vector3.new(
+                desync_velocity_x,
+                desync_velocity_y,
+                desync_velocity_z
+            )
+        end
+
+        -- Restore BEFORE render so camera sees real position
+        RunService.RenderStepped:Wait()
+        if not hrp or not hrp.Parent then return end
+
+        hrp.CFrame = old_cframe
+        if desync_velocity then
+            hrp.AssemblyLinearVelocity = old_velocity
+        end
+    end))
+
+    -- NetworkIsSleeping toggle: prevents server from seeing position changes.
+    -- Toggles at rate 1/desync_freeze_factor (default 100 times per second).
+    -- When sleeping, physics sender doesn't send position updates.
+    cheat.utility.track_conn(RunService.Heartbeat:Connect(function()
+        if not desync_turned_on then return end
+        local character = LocalPlayer.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local now = tick()
+        local factor = 1 / desync_freeze_factor
+        if now - sleep_old >= factor then
+            sleep_old = now
+            is_sleeping = not is_sleeping
+            pcall(function()
+                sethiddenproperty(hrp, "NetworkIsSleeping", is_sleeping)
+            end)
+        end
+    end))
+
+    -- Visualization: ghost clone showing spoofed position (like fake lag ghost)
+    local desync_ghost = nil
+    local desync_ghost_color = Color3.fromRGB(255, 80, 80)
+
+    cheat.utility.new_renderstepped(function()
+        -- Remove old ghost if not visualizing
+        if not desync_visualize or not desync_enabled or not replicated_hrp_cframe then
+            if desync_ghost then
+                desync_ghost:Destroy()
+                desync_ghost = nil
+            end
+            return
+        end
+
+        local character = LocalPlayer.Character
+        if not character then return end
+
+        -- Create or update ghost
+        if not desync_ghost or not desync_ghost.Parent then
+            local oldA = character.Archivable
+            character.Archivable = true
+            desync_ghost = character:Clone()
+            character.Archivable = oldA
+            if not desync_ghost then return end
+            desync_ghost.Name = "DesyncGhost_ESP_IGNORE"
+            for _, v in pairs(desync_ghost:GetDescendants()) do
+                if v:IsA("BasePart") then
+                    v.Material = Enum.Material.ForceField
+                    v.Color = desync_ghost_color
+                    v.CanCollide = false
+                    v.CanTouch = false
+                    v.CanQuery = false
+                    v.Massless = true
+                    v.Anchored = true
+                elseif v:IsA("Decal") or v:IsA("Texture") or v:IsA("Clothing")
+                    or v:IsA("Accessory") or v:IsA("Script") or v:IsA("LocalScript")
+                    or v:IsA("SurfaceAppearance") then
+                    v:Destroy()
+                end
+            end
+            local gHum = desync_ghost:FindFirstChildOfClass("Humanoid")
+            if gHum then gHum:Destroy() end
+            desync_ghost.Parent = workspace.Terrain
+        end
+
+        -- Move ghost to spoofed position
+        desync_ghost:PivotTo(replicated_hrp_cframe)
+    end)
+
+    -- ── Combat tab: Desync section ────────────────────────────────────────
+    local DSGroup = Tabs.Combat:AddRightGroupbox("Desync")
+    local ds_toggle = DSGroup:AddToggle("desync_enabled", {
+        Text = "Enable Desync",
+        Default = false,
+        Callback = function(v)
+            desync_enabled = v
+            cheat.desync_enabled = v
+            if v then
+                -- Enable anti-kick: set high physics rate, then toggle NetworkIsSleeping
+                desync_turned_on = true
+                set_physics_rate(32767, 32767 * 32)
+            else
+                -- Disable: restore physics rate
+                desync_turned_on = false
+                if original_rate then
+                    set_physics_rate(original_rate, original_bandwidth or original_rate * 32)
+                end
+            end
+        end
+    })
+    ds_toggle:AddKeyPicker("desync_key", {
+        Default = "B",
+        Text = "Desync Key",
+        Mode = "Toggle",
+        SyncToggleState = true,
+    })
+    DSGroup:AddSlider("desync_freeze", {
+        Text = "Freeze Factor", Min = 1, Max = 200, Rounding = 0, Default = 100,
+        Callback = function(v) desync_freeze_factor = v end
+    })
+    DSGroup:AddToggle("desync_visualize", {
+        Text = "Visualize Desync",
+        Default = false,
+        Callback = function(v) desync_visualize = v end
+    }):AddColorPicker("desync_vis_color", {
+        Default = Color3.fromRGB(255, 80, 80),
+        Callback = function(v)
+            desync_ghost_color = v
+            if desync_ghost then
+                for _, part in pairs(desync_ghost:GetDescendants()) do
+                    if part:IsA("BasePart") then
+                        part.Color = v
+                    end
+                end
+            end
+        end
+    })
+    DSGroup:AddSlider("desync_x", {
+        Text = "X Offset", Min = -10, Max = 10, Rounding = 1, Default = 0,
+        Callback = function(v) desync_x_offset = v end
+    })
+    DSGroup:AddSlider("desync_y", {
+        Text = "Y Offset", Min = -10, Max = 10, Rounding = 1, Default = 0,
+        Callback = function(v) desync_y_offset = v end
+    })
+    DSGroup:AddSlider("desync_z", {
+        Text = "Z Offset", Min = -10, Max = 10, Rounding = 1, Default = 0,
+        Callback = function(v) desync_z_offset = v end
+    })
+    DSGroup:AddSlider("desync_rx", {
+        Text = "X Rotate", Min = 0, Max = 20, Rounding = 1, Default = 0,
+        Callback = function(v) desync_x_rotate = math.rad(v * 18) end
+    })
+    DSGroup:AddSlider("desync_ry", {
+        Text = "Y Rotate", Min = 0, Max = 20, Rounding = 1, Default = 0,
+        Callback = function(v) desync_y_rotate = math.rad(v * 18) end
+    })
+    DSGroup:AddSlider("desync_rz", {
+        Text = "Z Rotate", Min = 0, Max = 20, Rounding = 1, Default = 0,
+        Callback = function(v) desync_z_rotate = math.rad(v * 18) end
+    })
+    DSGroup:AddToggle("desync_rand_rot", {
+        Text = "Random Rotation",
+        Default = false,
+        Callback = function(v) desync_random_rotation = v end
+    })
+    DSGroup:AddToggle("desync_rand_pos", {
+        Text = "Random Position",
+        Default = false,
+        Callback = function(v) desync_random_position = v end
+    })
+    DSGroup:AddSlider("desync_range", {
+        Text = "Random Range", Min = 0, Max = 25, Rounding = 1, Default = 5,
+        Callback = function(v) desync_random_position_range = v end
+    })
+    DSGroup:AddToggle("desync_velocity", {
+        Text = "Velocity Desync",
+        Default = false,
+        Callback = function(v) desync_velocity = v end
+    })
+    DSGroup:AddSlider("desync_vel_x", {
+        Text = "Velocity X", Min = -16384, Max = 16384, Rounding = 512, Default = 0,
+        Callback = function(v) desync_velocity_x = v end
+    })
+    DSGroup:AddSlider("desync_vel_y", {
+        Text = "Velocity Y", Min = -16384, Max = 16384, Rounding = 512, Default = 0,
+        Callback = function(v) desync_velocity_y = v end
+    })
+    DSGroup:AddSlider("desync_vel_z", {
+        Text = "Velocity Z", Min = -16384, Max = 16384, Rounding = 512, Default = 0,
+        Callback = function(v) desync_velocity_z = v end
+    })
+end)()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- [BLOCK 16e] HIT LOGS — UI panel showing recent hits with validation
+-- Validates each hit: was HP actually reduced after the shot? Yes → green (valid),
+-- No → red (invalid/missed). Auto-expires after 5s, smooth slide-in animation.
+-- ═══════════════════════════════════════════════════════════════════════════
+;(function()
+    cheat.hitlogs_enabled = false
+    cheat.hitlogs_valid_color = Color3.fromRGB(0, 200, 100)
+    cheat.hitlogs_invalid_color = Color3.fromRGB(200, 80, 80)
+    cheat.hitlogs_font = 2
+    cheat.hitlogs_size = 14
+    cheat.hitlogs_y = 400
+    cheat.hitlogs = { pending = {}, active = {} }
+
+    -- Hook ProjectileInflict remote calls to capture hits
+    -- (Called from cheat.fire_hit_effects too — but we hook here for ALL hits,
+    --  not just cheat-shoot-triggered ones.)
+    cheat.utility.new_heartbeat(function()
+        -- Hit log processing happens in renderstep below; this heartbeat just
+        -- ensures pending list gets processed even when game stutters.
+    end)
+
+    -- Renderstep: animate + expire hit log entries
+    local last_size, last_font
+    cheat.utility.new_renderstepped(function()
+        if not cheat.hitlogs_enabled then
+            for _, log in ipairs(cheat.hitlogs.active) do
+                if log.drawing then log.drawing:Remove() end
+                if log.bg then log.bg:Remove() end
+                if log.line then log.line:Remove() end
+            end
+            cheat.hitlogs.active = {}
+            cheat.hitlogs.pending = {}
+            return
+        end
+
+        local current_time = os.clock()
+
+        -- Process pending hits (validate HP delta)
+        for i = #cheat.hitlogs.pending, 1, -1 do
+            local pending = cheat.hitlogs.pending[i]
+            local is_valid = false
+            local is_resolved = false
+
+            local current_hp = 0
+            if pending.hum and pending.hum.Parent then
+                current_hp = pending.hum.Parent:GetAttribute("Health") or pending.hum.Health
+            else
+                is_valid = true  -- target died → valid
+                is_resolved = true
+            end
+
+            if not is_resolved and current_hp < pending.start_hp then
+                is_valid = true
+                is_resolved = true
+            end
+
+            if not is_resolved and current_time - pending.tick > 0.4 then
+                is_valid = false  -- no HP change within 400ms → invalid
+                is_resolved = true
+            end
+
+            if is_resolved then
+                local str = string.format("%s hit %s on %dm", pending.name, pending.part, pending.dist)
+                local log_color = is_valid and cheat.hitlogs_valid_color or cheat.hitlogs_invalid_color
+                local bg = cheat.utility.new_drawing("Square", {
+                    Size = Vector2.new(0, 0), Position = Vector2.new(-300, cheat.hitlogs_y),
+                    Color = Color3.fromRGB(20, 20, 20), Filled = true, Transparency = 1,
+                    Visible = true, ZIndex = 98
+                })
+                local line = cheat.utility.new_drawing("Square", {
+                    Size = Vector3.new(3, 0), Position = Vector2.new(-300, cheat.hitlogs_y),
+                    Color = log_color, Filled = true, Transparency = 1,
+                    Visible = true, ZIndex = 99
+                })
+                local text = cheat.utility.new_drawing("Text", {
+                    Text = str, Size = cheat.hitlogs_size, Font = cheat.hitlogs_font,
+                    Center = false, Outline = true, Color = Color3.new(1, 1, 1),
+                    Position = Vector2.new(-300, cheat.hitlogs_y), Visible = true, ZIndex = 100
+                })
+                table.insert(cheat.hitlogs.active, 1, {
+                    drawing = text, bg = bg, line = line, str = str,
+                    spawn_tick = current_time, target_y = cheat.hitlogs_y, current_x = -300
+                })
+                table.remove(cheat.hitlogs.pending, i)
+            end
+        end
+
+        -- Animate active entries (slide in + stack + fade out)
+        local base_y = cheat.hitlogs_y
+        for i = #cheat.hitlogs.active, 1, -1 do
+            local log = cheat.hitlogs.active[i]
+            local age = current_time - log.spawn_tick
+            if age > 5 then
+                if log.drawing then log.drawing:Remove() end
+                if log.bg then log.bg:Remove() end
+                if log.line then log.line:Remove() end
+                table.remove(cheat.hitlogs.active, i)
+            else
+                if log.current_x < 20 then
+                    log.current_x = log.current_x + (20 - log.current_x) * 0.15
+                end
+                local text_bounds = log.drawing.TextBounds
+                local box_height = text_bounds.Y + 8
+                local box_width = text_bounds.X + 16
+                log.target_y = base_y + ((i - 1) * (box_height + 4))
+                local current_y = log.drawing.Position.Y
+                local new_y = current_y + (log.target_y - current_y) * 0.2
+                local alpha = 1
+                if age > 4 then alpha = 1 - (age - 4) end
+                log.drawing.Position = Vector2.new(log.current_x + 8, new_y + 4)
+                log.drawing.Transparency = alpha
+                if cheat.hitlogs_size ~= last_size then
+                    last_size = cheat.hitlogs_size
+                    log.drawing.Size = cheat.hitlogs_size
+                end
+                if cheat.hitlogs_font ~= last_font then
+                    last_font = cheat.hitlogs_font
+                    log.drawing.Font = cheat.hitlogs_font
+                end
+                log.bg.Position = Vector2.new(log.current_x, new_y)
+                log.bg.Size = Vector2.new(box_width, box_height)
+                log.bg.Transparency = alpha
+                log.line.Position = Vector2.new(log.current_x, new_y)
+                log.line.Size = Vector2.new(3, box_height)
+                log.line.Transparency = alpha
+            end
+        end
+    end)
+
+    -- Hook cheat.fire_hit_effects (defined in BLOCK 09e) to capture hits
+    -- We wrap the existing function so hits get logged too.
+    local _orig_fire_hit_effects = cheat.fire_hit_effects
+    cheat.fire_hit_effects = function(target_part)
+        if cheat.hitlogs_enabled and target_part and typeof(target_part) == "Instance" then
+            local target_char = target_part.Parent
+            local target_name = target_char and target_char.Name or "Unknown"
+            local hum = target_char and target_char:FindFirstChildOfClass("Humanoid")
+            if target_name ~= "Unknown" and hum and Camera then
+                local dist = math.floor((target_part.Position - Camera.CFrame.p).Magnitude / 2.8)
+                table.insert(cheat.hitlogs.pending, {
+                    name = target_name,
+                    part = target_part.Name,
+                    dist = dist,
+                    tick = os.clock(),
+                    hum = hum,
+                    start_hp = target_char:GetAttribute("Health") or hum.Health
+                })
+            end
+        end
+        if _orig_fire_hit_effects then
+            return _orig_fire_hit_effects(target_part)
+        end
+    end
+
+    -- ── Visuals tab: Hit Logs section ─────────────────────────────────────
+    local HitLogGroup = Tabs.Visuals:AddRightGroupbox("Hit Logs")
+    HitLogGroup:AddToggle("hl_on", {
+        Text = "Enable Hit Logs",
+        Default = false,
+        Callback = function(v) cheat.hitlogs_enabled = v end
+    })
+    HitLogGroup:AddLabel("Valid Color"):AddColorPicker("hl_valcol", {
+        Default = Color3.fromRGB(0, 200, 100),
+        Callback = function(v) cheat.hitlogs_valid_color = v end
+    })
+    HitLogGroup:AddLabel("Invalid Color"):AddColorPicker("hl_invcol", {
+        Default = Color3.fromRGB(200, 80, 80),
+        Callback = function(v) cheat.hitlogs_invalid_color = v end
+    })
+    HitLogGroup:AddDropdown("hl_font", {
+        Text = "Font",
+        Values = {"UI", "System", "Plex", "Monospace"},
+        Default = "Plex",
+        Callback = function(v)
+            local fm = { UI = 0, System = 1, Plex = 2, Monospace = 3 }
+            cheat.hitlogs_font = fm[v] or 2
+        end
+    })
+    HitLogGroup:AddSlider("hl_size", {
+        Text = "Text Size", Min = 10, Max = 30, Rounding = 0, Default = 14,
+        Callback = function(v) cheat.hitlogs_size = v end
+    })
+    HitLogGroup:AddSlider("hl_y", {
+        Text = "Y Position", Min = 0, Max = 1500, Rounding = 0, Default = 400,
+        Callback = function(v) cheat.hitlogs_y = v end
+    })
+end)()
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- [BLOCK 16f] FOV GLOW — 20 circles around the FOV circle for visual glow
+-- Renders 10 outer + 10 inner circles when FOV circle is shown, animated by intensity.
+-- ═══════════════════════════════════════════════════════════════════════════
+;(function()
+    local fov_glow_intensity = 1
+    local fov_glow_circles = {}
+    for i = 1, 20 do
+        local c = Drawing.new("Circle")
+        c.Thickness = 1
+        c.NumSides = 60
+        c.Filled = false
+        c.Visible = false
+        c.Transparency = 0.5
+        c.ZIndex = 1
+        cheat.drawings[c] = c
+        fov_glow_circles[i] = c
+    end
+
+    -- Visuals tab: FOV Glow toggle + slider
+    local fov_glow_toggle = ItemFinderGroup:AddToggle("fov_glow", {
+        Text = "FOV Outline Glow",
+        Default = false,
+        Callback = function() end  -- checked at runtime below
+    })
+    ItemFinderGroup:AddSlider("fov_glow_int", {
+        Text = "FOV Glow Intensity",
+        Min = 1, Max = 100, Rounding = 0, Default = 10,
+        Callback = function(v) fov_glow_intensity = v / 10 end
+    })
+
+    -- Renderstep: position glow circles around FOV circle
+    local _was_visible = false
+    cheat.utility.new_renderstepped(function()
+        local glow_on = fov_glow_toggle and fov_glow_toggle.Value
+        local fov_active = silent_aim.fov and silent_aim.fov_show
+        if not (glow_on and fov_active) then
+            if _was_visible then
+                for i = 1, 20 do fov_glow_circles[i].Visible = false end
+                _was_visible = false
+            end
+            return
+        end
+        _was_visible = true
+        local pos = Vector2.new(Mouse.X, Mouse.Y + GuiInset.Y)
+        local intensity = fov_glow_intensity
+        local th = 1 + (intensity * 0.5)
+        for i = 1, 10 do
+            -- outer rings
+            local oc = fov_glow_circles[i]
+            oc.Position = pos
+            oc.Radius = silent_aim.fov_size + (i * (intensity * 0.5))
+            oc.Color = silent_aim.fov_color or silent_aim.tracer_color or Color3.new(1, 1, 1)
+            oc.Transparency = 0.2 - (i * 0.02)
+            oc.Thickness = th
+            oc.Visible = true
+            -- inner rings
+            local ic = fov_glow_circles[i + 10]
+            ic.Position = pos
+            ic.Radius = math.max(0, silent_aim.fov_size - (i * (intensity * 0.5)))
+            ic.Color = silent_aim.fov_color or Color3.new(1, 1, 1)
+            ic.Transparency = 0.2 - (i * 0.02)
+            ic.Thickness = th
+            ic.Visible = true
+        end
+    end)
+end)()
+
 -- [BLOCK 16] FINAL INIT
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FIX #3: полный unload — чистит хуки, drawing'и, коннекты, GUI, parts, lighting,
@@ -9078,6 +10423,9 @@ cheat.unload = function()
         end
     end)
     pcall(function() RunService:UnbindFromRenderStep("ZalupaChamsRS") end)
+    -- Unbind new renderstep hooks (Anti-Aim restore, UG Resolver).
+    pcall(function() RunService:UnbindFromRenderStep("ZalupaRealCFrameRestore") end)
+    pcall(function() RunService:UnbindFromRenderStep("UGResolverRS") end)
 
     -- 2. Гасим диспетчерские таблицы — оставшиеся new_heartbeat/new_renderstepped больше не зовутся.
     cheat.connections.heartbeats = {}
@@ -9107,6 +10455,22 @@ cheat.unload = function()
         pcall(hookmetamethod, game, "__namecall", cheat._namecall_old)
         cheat._namecall_old = nil
     end
+
+    cheat.aa_enabled = false
+    cheat.fake_lag_enabled = false
+    cheat.desync_enabled = false
+    cheat.real_CFrame = nil
+    -- Restore physics rate on unload
+    pcall(function()
+        if getfflag then
+            local rate = getfflag("S2PhysicsSenderRate")
+            local bw = getfflag("PhysicsSenderMaxBandwidthBps")
+            if rate and bw then
+                setfflag("S2PhysicsSenderRate", tostring(rate))
+                setfflag("PhysicsSenderMaxBandwidthBps", tostring(bw))
+            end
+        end
+    end)
 
     -- 7. Ресторим InstantMosin recoil (если был включён). FIX #18: lookup by name now.
     pcall(function()
@@ -9158,7 +10522,7 @@ end
 cheat.EspLibrary.load()
 Library:Notify({
     Title = "Zalupa.HooK",
-    Description = "Loaded successfully. Welcome to Zalupa.HooK v1.0 Beta.",
+    Description = "Loaded successfully. Welcome to Zalupa.HooK v1.5 Updated.",
     Time = 5
 })
 
